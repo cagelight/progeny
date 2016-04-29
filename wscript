@@ -9,7 +9,7 @@ out = 'build'
 projname = 'progeny'
 coreprog_name = projname
 
-g_cflags = ["-Wall", "-Wextra", "-std=c11"]
+g_cflags = ["-Wall", "-Wextra", "-std=gnu11"]
 def btype_cflags(ctx):
 	return {
 		"DEBUG"   : g_cflags + ["-Og", "-ggdb3", "-march=core2", "-mtune=native"],

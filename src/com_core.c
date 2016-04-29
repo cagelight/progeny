@@ -4,8 +4,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-
 #include <unistd.h>
+
+#include <time.h>
 
 atomic bool com_close_semaphore;
 
@@ -30,6 +31,13 @@ void com_run(void) {
 	while (!atomic_load(&com_close_semaphore)) {
 		
 		com_xcb_frame();
+		com_vk_swap();
+		
+		struct timespec slp = {
+			0,
+			NANO / 5,
+		};
+		nanosleep(&slp, NULL);
 		
 		if (atomic_load(&xcb_close_semaphore))
 			atomic_store(&com_close_semaphore, true);
