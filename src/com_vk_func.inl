@@ -1,19 +1,29 @@
 
-#ifdef VK_FN_DECL
-#undef VK_FN_DECL
+#ifdef VK_FN_IDECL
+#undef VK_FN_IDECL
 
-#define VK_TOP_PROC( func ) PFN_vk##func vk_##func;
-#define VK_GLOBAL_PROC( func ) PFN_vk##func vk_##func;
-#define VK_INSTANCE_PROC( func ) PFN_vk##func vk_##func;
-#define VK_DEVICE_PROC( func ) PFN_vk##func vk_##func;
+#define VK_TOP_PROC( func ) PFN_vk##func vk##func;
+#define VK_GLOBAL_PROC( func ) PFN_vk##func vk##func;
+#define VK_INSTANCE_PROC( func ) PFN_vk##func vk##func;
+#define VK_DEVICE_PROC( func )
+
+#endif
+
+#ifdef VK_FN_DDECL
+#undef VK_FN_DDECL
+
+#define VK_TOP_PROC( func )
+#define VK_GLOBAL_PROC( func )
+#define VK_INSTANCE_PROC( func )
+#define VK_DEVICE_PROC( func ) PFN_vk##func vk##func;
 
 #endif
 
 #ifdef VK_FN_SYM_GLOBAL
 #undef VK_FN_SYM_GLOBAL
 
-#define VK_TOP_PROC( func ) vk_##func = (PFN_vk##func)dlsym(vk_handle, "vk"#func); if (!vk_##func) { com_printf_error("could not find required top level symbol \"%s\" in loaded vulkan library", "vk"#func); return false; }
-#define VK_GLOBAL_PROC( func ) vk_##func = (PFN_vk##func)vk_GetInstanceProcAddr(NULL, "vk"#func); if (!vk_##func) { com_printf_error("could not find required instance level symbol \"%s\" in loaded vulkan library", "vk"#func); return false; }
+#define VK_TOP_PROC( func ) vk##func = (PFN_vk##func)dlsym(vk_handle, "vk"#func); if (!vk##func) { com_printf_error("could not find required top level symbol \"%s\" in loaded vulkan library", "vk"#func); goto finalize; }
+#define VK_GLOBAL_PROC( func ) vk##func = (PFN_vk##func)vkGetInstanceProcAddr(NULL, "vk"#func); if (!vk##func) { com_printf_error("could not find required instance level symbol \"%s\" in loaded vulkan library", "vk"#func); goto finalize; }
 #define VK_INSTANCE_PROC( func )
 #define VK_DEVICE_PROC( func )
 
@@ -24,7 +34,7 @@
 
 #define VK_TOP_PROC( func )
 #define VK_GLOBAL_PROC( func )
-#define VK_INSTANCE_PROC( func ) vk_##func = (PFN_vk##func)vk_GetInstanceProcAddr(vk_instance, "vk"#func); if (!vk_##func) { com_printf_error("could not find required instance level symbol \"%s\" in loaded vulkan library", "vk"#func); return false; }
+#define VK_INSTANCE_PROC( func ) vk##func = (PFN_vk##func)vkGetInstanceProcAddr(vk_instance, "vk"#func); if (!vk##func) { com_printf_error("could not find required instance level symbol \"%s\" in loaded vulkan library", "vk"#func); goto finalize; }
 #define VK_DEVICE_PROC( func )
 
 #endif
@@ -72,6 +82,13 @@ VK_INSTANCE_PROC( GetPhysicalDeviceSurfacePresentModesKHR )
 
 //XCB Extension
 VK_INSTANCE_PROC( CreateXcbSurfaceKHR )
+
+//Debug Extension
+#ifdef PROGENY_DEBUG
+VK_INSTANCE_PROC( CreateDebugReportCallbackEXT )
+VK_INSTANCE_PROC( DebugReportMessageEXT )
+VK_INSTANCE_PROC( DestroyDebugReportCallbackEXT )
+#endif
 
 //================================================================
 //----------------------------------------------------------------

@@ -1,6 +1,24 @@
 #ifndef PROGENY_COM_H
 #define PROGENY_COM_H
 
+#ifdef _ASSERT_H
+#error 
+#endif
+#ifndef PROGENY_DEBUG
+#define NDEBUG
+#endif
+#include <assert.h>
+
+#define thread_local _Thread_local
+#define atomic _Atomic
+#define static_assert _Static_assert
+
+#define likely(x) __builtin_expect((x),1)
+#define unlikely(x) __builtin_expect((x),0)
+#define unu __attribute__ ((unused))
+
+typedef unsigned int uint;
+
 #include <jemalloc/jemalloc.h>
 
 #include <stdlib.h>
@@ -9,7 +27,16 @@
 #include <string.h>
 #include <stdatomic.h>
 
-#include "com_snippits.h"
+#define NANO 1000000000
+#define MICRO 1000000
+#define MILLI 1000
+
+#define MIN(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
+#define MAX(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
+#define CLAMP(value, min, max) ({ __typeof__ (value) _v = (value); __typeof__ (value) _min = (min); __typeof__ (value) _max = (max); _v > _max ? _max : _v < _min ? _min : _v; })
+
+#define ipause __asm volatile ("pause" ::: "memory")
+#define erase( ptr ) ({ free(ptr); ptr = NULL; })
 
 char * vas(char const * fmt, ...);
 

@@ -23,6 +23,8 @@ static VkQueue vk_queue_present = NULL;
 
 static VkSemaphore vk_sem_imgavail = NULL;
 static VkSemaphore vk_sem_rndcomp = NULL;
+static uint32_t vk_cmdfences_count = 0;
+static VkFence * vk_cmdfences = NULL;
 
 static VkSwapchainKHR vk_swapchain = NULL;
 static VkFormat vk_swapchain_format;
@@ -40,6 +42,9 @@ static uint32_t vk_imageviews_count = 0;
 static VkImageView * vk_imageviews = NULL;
 static uint32_t vk_framebuffers_count = 0;
 static VkFramebuffer * vk_framebuffers = NULL;
+
+static VkBuffer vk_testv_buffer = NULL;
+static VkDeviceMemory vk_testv_mem = NULL;
 
 static bool vk_load(void) {
 	vk_handle = dlopen("libvulkan.so", RTLD_LOCAL | RTLD_NOW);
@@ -100,7 +105,7 @@ static bool vk_init_instance(void) {
 		.applicationVersion = VK_MAKE_VERSION(0, 0, 1),
 		.pEngineName = "Progeny",
 		.engineVersion = VK_MAKE_VERSION(0, 0, 1),
-		.apiVersion = VK_MAKE_VERSION(1, 0, 8),
+		.apiVersion = VK_MAKE_VERSION(1, 0, 11),
 	};
 	
 	static char const * const extensions [] = { "VK_KHR_surface", "VK_KHR_xcb_surface" };
@@ -365,6 +370,36 @@ static bool vk_create_semaphores(void) {
 //----------------------------------------------------------------
 //================================================================
 
+static bool vk_create_fences(void) {
+	bool stat = false;
+	VkResult res;
+	
+	VkFenceCreateInfo fence_create_info = {
+		.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = VK_FENCE_CREATE_SIGNALED_BIT,
+	};
+	
+	vk_cmdfences_count = vk_swapchain_images_count;
+	vk_cmdfences = malloc(vk_cmdfences_count * sizeof(VkFence));
+	
+	for (size_t i = 0; i < vk_cmdfences_count; i++) {
+		res = vk_CreateFence(vk_device, &fence_create_info, NULL, &vk_cmdfences[i]);
+		if (res != VK_SUCCESS) {
+			com_printf_error("vkCreateFence unsuccessful (%i)", res);
+			goto ret;
+		}
+	}
+	
+	stat = true;
+	ret:
+	return stat;
+}
+
+//================================================================
+//----------------------------------------------------------------
+//================================================================
+
 static bool vk_init_swapchain(void) {
 	bool stat = false;
 	VkResult res;
@@ -432,10 +467,10 @@ static bool vk_init_swapchain(void) {
 	uint32_t selected_swapchain_image_count;
 	switch(selected_present_mode) {
 	case VK_PRESENT_MODE_MAILBOX_KHR:
-		selected_swapchain_image_count = clamp(3, surface_capabilities.minImageCount, surface_capabilities.maxImageCount);
+		selected_swapchain_image_count = CLAMP(3, surface_capabilities.minImageCount, surface_capabilities.maxImageCount);
 		break;
 	default:
-		selected_swapchain_image_count = clamp(2, surface_capabilities.minImageCount, surface_capabilities.maxImageCount);
+		selected_swapchain_image_count = CLAMP(2, surface_capabilities.minImageCount, surface_capabilities.maxImageCount);
 		break;
 	}
 	
@@ -444,8 +479,8 @@ static bool vk_init_swapchain(void) {
 		selected_extent.width = 800;
 		selected_extent.height = 600;
 	}
-	selected_extent.width = clamp(selected_extent.width, surface_capabilities.minImageExtent.width, surface_capabilities.maxImageExtent.width);
-	selected_extent.height = clamp(selected_extent.height, surface_capabilities.minImageExtent.height, surface_capabilities.maxImageExtent.height);
+	selected_extent.width = CLAMP(selected_extent.width, surface_capabilities.minImageExtent.width, surface_capabilities.maxImageExtent.width);
+	selected_extent.height = CLAMP(selected_extent.height, surface_capabilities.minImageExtent.height, surface_capabilities.maxImageExtent.height);
 	
 	VkSurfaceFormatKHR selected_format = surface_formats[0];
 	if (selected_format.format == VK_FORMAT_UNDEFINED) {
@@ -528,7 +563,7 @@ static bool vk_init_command (void) {
 	VkCommandPoolCreateInfo command_pool_create = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 		.pNext = NULL,
-		.flags = 0,
+		.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
 		.queueFamilyIndex = vk_queue_index_graphics,
 	};
 	
@@ -545,101 +580,16 @@ static bool vk_init_command (void) {
 		.pNext = NULL,
 		.commandPool = vk_cmdpool_graphics,
 		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-		.commandBufferCount = vk_cmdbufs_graphics_count
+		.commandBufferCount = 1,
 	};
-	res = vk_AllocateCommandBuffers(vk_device, &cmdbufs_allocate, vk_cmdbufs_graphics);
-	if (res != VK_SUCCESS) {
-		com_printf_error("vkAllocateCommandBuffers unsuccessful (%i)", res);
-		goto ret;
-	}
-	
-	VkCommandBufferBeginInfo cmdbuf_graphics_begin = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-		.pNext = NULL,
-		.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,
-		.pInheritanceInfo = NULL,
-	};
-	
-	VkImageSubresourceRange subresource_range = {
-		.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-		.baseMipLevel = 0,
-		.levelCount = 1,
-		.baseArrayLayer = 0,
-		.layerCount = 1,
-	};
-	
-	VkClearValue clear_color = {
-		.color.float32 = { 
-			0.0f,
-			0.125f,
-			0.25f,
-			0.0f,
-		},
-	};
-	
 	for (uint32_t i = 0; i < vk_cmdbufs_graphics_count; i++) {
-		vk_BeginCommandBuffer(vk_cmdbufs_graphics[i], &cmdbuf_graphics_begin);
-		if (vk_queue_index_graphics != vk_queue_index_present) {
-			VkImageMemoryBarrier barrier_from_present_to_draw = {
-				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-				.pNext = NULL,
-				.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT,
-				.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-				.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-				.srcQueueFamilyIndex = vk_queue_index_present,
-				.dstQueueFamilyIndex = vk_queue_index_graphics,
-				.image = vk_swapchain_images[i],
-				.subresourceRange = subresource_range,
-			};
-			vk_CmdPipelineBarrier(vk_cmdbufs_graphics[i], VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0, NULL, 1, &barrier_from_present_to_draw);
-		}
-		
-		VkRenderPassBeginInfo renderpass_begin = {
-			.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-			.pNext = NULL,
-			.renderPass = vk_renderpass,
-			.framebuffer = vk_framebuffers[i],
-			.renderArea = {
-				.offset = {
-					.x = 0,
-					.y = 0,
-				},
-				.extent = {
-					.width = 800,
-					.height = 600,
-				},
-			},
-			.clearValueCount = 1,
-			.pClearValues = &clear_color,
-		};
-		
-		vk_CmdBeginRenderPass(vk_cmdbufs_graphics[i], &renderpass_begin, VK_SUBPASS_CONTENTS_INLINE);
-		vk_CmdBindPipeline(vk_cmdbufs_graphics[i], VK_PIPELINE_BIND_POINT_GRAPHICS, vk_graphics_pipeline);
-		vk_CmdDraw(vk_cmdbufs_graphics[i], 3, 1, 0, 0);
-		vk_CmdEndRenderPass(vk_cmdbufs_graphics[i]);
-		
-		if (vk_queue_index_graphics != vk_queue_index_present) {
-			VkImageMemoryBarrier barrier_from_draw_to_present = {
-				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-				.pNext = NULL,
-				.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
-				.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-				.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-				.srcQueueFamilyIndex = vk_queue_index_graphics,
-				.dstQueueFamilyIndex = vk_queue_index_present,
-				.image = vk_swapchain_images[i],
-				.subresourceRange = subresource_range,
-			};
-			vk_CmdPipelineBarrier(vk_cmdbufs_graphics[i], VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &barrier_from_draw_to_present);
-		}
-		res = vk_EndCommandBuffer(vk_cmdbufs_graphics[i]);
+		res = vk_AllocateCommandBuffers(vk_device, &cmdbufs_allocate, &vk_cmdbufs_graphics[i]);
 		if (res != VK_SUCCESS) {
-			com_printf_error("vkEndCommandBuffer unsuccessful (%i)", res);
+			com_printf_error("vkAllocateCommandBuffers unsuccessful (%i)", res);
 			goto ret;
 		}
 	}
+	
 	
 	stat = true;
 	ret:
@@ -649,6 +599,11 @@ static bool vk_init_command (void) {
 //================================================================
 //----------------------------------------------------------------
 //================================================================
+
+typedef struct vk_test_vertex_s {
+	float x, y;
+	float r, g, b;
+} vk_test_vertex_t;
 
 static bool vk_init_render(void) {
 	
@@ -705,7 +660,7 @@ static bool vk_init_render(void) {
 	
 	vk_framebuffers_count = vk_imageviews_count = vk_swapchain_images_count;
 	vk_imageviews = malloc(vk_imageviews_count * sizeof(VkImageView));
-	vk_framebuffers = malloc(vk_framebuffers_count * sizeof(VkFramebuffer));
+	vk_framebuffers = calloc(1, vk_framebuffers_count * sizeof(VkFramebuffer));
 	
 	for (uint32_t i = 0; i < vk_imageviews_count; i++) {
 		VkImageViewCreateInfo imageview_create = {
@@ -735,38 +690,27 @@ static bool vk_init_render(void) {
 			com_printf_error("vkCreateImageView unsuccessful (%i)", res);
 			goto ret;
 		}
-			
-		VkFramebufferCreateInfo framebuffer_create = {
-			.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-			.pNext = NULL,
-			.flags = 0,
-			.renderPass = vk_renderpass,
-			.attachmentCount = 1,
-			.pAttachments = vk_imageviews+i,
-			.width = 800,
-			.height = 600,
-			.layers = 1,
-		};
-		
-		res = vk_CreateFramebuffer(vk_device, &framebuffer_create, NULL, vk_framebuffers+i);
-		if (res != VK_SUCCESS) {
-			com_printf_error("vkCreateImageView unsuccessful (%i)", res);
-			goto ret;
-		}
 	}
 	
 	char const * vert_spv = \
-	"#version 400\n\n"\
-	"void main() {"\
-	"	vec2 pos[3] = vec2[3] (vec2(-0.7, 0.7), vec2(0.7, 0.7), vec2(0.0, -0.7));"\
-	"	gl_Position = vec4( pos[gl_VertexIndex], 0.0, 1.0 );"\
+	"#version 450\n\n"
+	"layout(location = 0) in vec2 i_Position;"
+	"layout(location = 1) in vec3 i_Color;"
+	"out gl_PerVertex {"
+		"vec4 gl_Position;"
+	"};"
+	"layout(location = 0) out vec4 v_Color;"
+	"void main() {"
+		"gl_Position = vec4(i_Position, 0, 1);"
+		"v_Color = vec4(i_Color, 0);"
 	"}";
 
 	char const * frag_spv = \
-	"#version 400\n\n"\
-	"layout(location = 0) out vec4 out_Color;\n"\
-	"void main() {"\
-	"	out_Color = vec4( 0.0, 0.4, 1.0, 1.0 );"\
+	"#version 450\n\n"\
+	"layout(location = 0) in vec4 v_Color;"
+	"layout(location = 0) out vec4 o_Color;"
+	"void main() {"
+		"o_Color = v_Color;"
 	"}";
 	
 	VkShaderModule vk_shamod_vert;
@@ -839,14 +783,35 @@ static bool vk_init_render(void) {
 		},
 	};
 	
+	VkVertexInputBindingDescription vertex_binding_description = {
+		.binding = 0,
+		.stride = sizeof(vk_test_vertex_t),
+		.inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+	};
+	
+	VkVertexInputAttributeDescription vertex_attribute_descriptions [2] = {
+		{
+			.location = 0,
+			.binding = vertex_binding_description.binding,
+			.format = VK_FORMAT_R32G32_SFLOAT,
+			.offset = offsetof(vk_test_vertex_t, x),
+		},
+		{
+			.location = 1,
+			.binding = vertex_binding_description.binding,
+			.format = VK_FORMAT_R32G32B32_SFLOAT,
+			.offset = offsetof(vk_test_vertex_t, r),
+		}
+	};
+	
 	VkPipelineVertexInputStateCreateInfo vertex_input_state_create = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.vertexBindingDescriptionCount = 0,
-		.pVertexBindingDescriptions = NULL,
-		.vertexAttributeDescriptionCount = 0,
-		.pVertexAttributeDescriptions = NULL,
+		.vertexBindingDescriptionCount = 1,
+		.pVertexBindingDescriptions = &vertex_binding_description,
+		.vertexAttributeDescriptionCount = 2,
+		.pVertexAttributeDescriptions = vertex_attribute_descriptions,
 	};
 	
 	VkPipelineInputAssemblyStateCreateInfo input_assembly_state_create = {
@@ -857,28 +822,27 @@ static bool vk_init_render(void) {
 		.primitiveRestartEnable = VK_FALSE,
 	};
 	
-	VkViewport viewport = {
-		.x = 0,
-		.y = 0,
-		.width = 800,
-		.height = 600,
-		.minDepth = 0,
-		.maxDepth = 1,
-	};
-	
-	VkRect2D scissor = {
-		{0, 0},
-		{800, 600},
-	};
-	
 	VkPipelineViewportStateCreateInfo viewport_state_create = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.viewportCount = 1,
-		.pViewports = &viewport,
-		.scissorCount = 1,
-		.pScissors = &scissor,
+		.viewportCount = 0,
+		.pViewports = NULL,
+		.scissorCount = 0,
+		.pScissors = NULL,
+	};
+	
+	VkDynamicState dynamic_states [2] = {
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_SCISSOR
+	};
+	
+	VkPipelineDynamicStateCreateInfo  dynamic_state_create_info = {
+		.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.dynamicStateCount = 2,
+		.pDynamicStates = dynamic_states
 	};
 	
 	VkPipelineRasterizationStateCreateInfo rasterization_state_create = {
@@ -945,7 +909,7 @@ static bool vk_init_render(void) {
 		.pMultisampleState = &multisample_state_create,
 		.pDepthStencilState = NULL,
 		.pColorBlendState = &color_blend_state_create,
-		.pDynamicState = NULL,
+		.pDynamicState = &dynamic_state_create_info,
 		.layout = vk_pipeline_layout,
 		.renderPass = vk_renderpass,
 		.subpass = 0,
@@ -964,11 +928,90 @@ static bool vk_init_render(void) {
 	return stat;
 }
 
+vk_test_vertex_t testv [] = {
+	{0.5, 1, 1, 0, 0},
+	{0.7, 0, 0, 1, 0},
+	{0, 0, 0, 0, 1}
+};
+
+static bool vk_init_testv(void) {
+	bool stat = false;
+	VkResult res;
+	
+	VkBufferCreateInfo buffer_create_info = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.size = sizeof(testv),
+		.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL,
+	};
+	
+	res = vk_CreateBuffer(vk_device, &buffer_create_info, NULL, &vk_testv_buffer);
+	if (res != VK_SUCCESS) {
+		com_printf_error("vkCreateBuffer unsuccessful (%i)", res);
+		goto ret;
+	}
+	
+	VkMemoryRequirements buffer_memory_requirements;
+	vk_GetBufferMemoryRequirements(vk_device, vk_testv_buffer, &buffer_memory_requirements);
+	
+	VkPhysicalDeviceMemoryProperties memory_properties;
+	vk_GetPhysicalDeviceMemoryProperties(vk_device_physical, &memory_properties);
+	
+	for (uint32_t i = 0; i < memory_properties.memoryTypeCount; i++) {
+		if ((buffer_memory_requirements.memoryTypeBits & (1 << i)) && (memory_properties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+			VkMemoryAllocateInfo memory_allocate_info = {
+				.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+				.pNext = NULL,
+				.allocationSize = buffer_memory_requirements.size,
+				.memoryTypeIndex = i,
+			};
+			
+			res = vk_AllocateMemory(vk_device, &memory_allocate_info, NULL, &vk_testv_mem);
+			if (res != VK_SUCCESS) {
+				com_printf_error("vkAllocateMemory unsuccessful (%i)", res);
+				goto ret;
+			}
+			break;
+		}
+	}
+	
+	res = vk_BindBufferMemory(vk_device, vk_testv_buffer, vk_testv_mem, 0);
+	if (res != VK_SUCCESS) {
+		com_printf_error("vkBindBufferMemory unsuccessful (%i)", res);
+		goto ret;
+	}
+	
+	void * vertex_buffer_memory_pointer;
+	res = vk_MapMemory(vk_device, vk_testv_mem, 0, sizeof(testv), 0, &vertex_buffer_memory_pointer);
+	if (res != VK_SUCCESS) {
+		com_printf_error("vk_MapMemory unsuccessful (%i)", res);
+		goto ret;
+	}
+	memcpy(vertex_buffer_memory_pointer, testv, sizeof(testv));
+	VkMappedMemoryRange flush_range = {
+		.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+		.pNext = NULL,
+		.memory = vk_testv_mem,
+		.offset = 0,
+		.size = VK_WHOLE_SIZE,
+	};
+	vk_FlushMappedMemoryRanges(vk_device, 1, &flush_range);
+	vk_UnmapMemory(vk_device, vk_testv_mem);
+	
+	stat = true;
+	ret:
+	return stat;
+}
+
 //================================================================
 //----------------------------------------------------------------
 //================================================================
 
-bool com_vk_init (void) {
+bool com_vk_init_old (void) {
 	if (!vk_load()) {
 		com_print_error("failed to load vulkan library");
 		return false;
@@ -993,8 +1036,16 @@ bool com_vk_init (void) {
 		com_print_error("failed to initialize swapchain");
 		return false;
 	}
+	if (!vk_create_fences()) {
+		com_print_error("failed to create semaphores");
+		return false;
+	}
 	if (!vk_init_render()) {
 		com_print_error("failed to initialize render structures");
+		return false;
+	}
+	if (!vk_init_testv()) {
+		com_print_error("failed to initialize test");
 		return false;
 	}
 	if (!vk_init_command()) {
@@ -1009,7 +1060,7 @@ bool com_vk_init (void) {
 //----------------------------------------------------------------
 //================================================================
 
-void com_vk_term (void) {
+void com_vk_term_old (void) {
 	if (vk_framebuffers) {
 		for (uint32_t i = 0; i < vk_framebuffers_count; i++) {
 			vk_DestroyFramebuffer(vk_device, vk_framebuffers[i], NULL);
@@ -1041,9 +1092,25 @@ void com_vk_term (void) {
 //----------------------------------------------------------------
 //================================================================
 
+static unsigned int t = 0;
+
 void com_vk_swap (void) {
 	
 	VkResult res;
+	
+	VkFence f1;
+	VkFenceCreateInfo fenceCreateInfo = {
+	    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+	    .pNext = NULL,
+	    .flags = 0
+	};
+	res = vk_CreateFence(vk_device, &fenceCreateInfo, NULL, &f1);
+	if (res != VK_SUCCESS) {
+		com_printf_error("vkCreateFence unsuccessful (%i)", res);
+		return;
+	}
+	
+	//vk_DeviceWaitIdle(vk_device);
 	
 	uint32_t current_image_index;
 	res = vk_AcquireNextImageKHR(vk_device, vk_swapchain, UINT64_MAX, vk_sem_imgavail, NULL, &current_image_index);
@@ -1052,7 +1119,132 @@ void com_vk_swap (void) {
 		return;
 	}
 	
-	VkPipelineStageFlags wait_dst_stage_mask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	if (vk_framebuffers[current_image_index]) {
+		vk_DestroyFramebuffer(vk_device, vk_framebuffers[current_image_index], NULL);
+	}
+	VkFramebufferCreateInfo framebuffer_create_info = {
+		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.renderPass = vk_renderpass,
+		.attachmentCount = 1,
+		.pAttachments = &vk_imageviews[current_image_index],
+		.width = 800,
+		.height = 600,
+		.layers = 1,
+	};
+	res = vk_CreateFramebuffer(vk_device, &framebuffer_create_info, NULL, &vk_framebuffers[current_image_index]);
+	if (res != VK_SUCCESS) {
+		com_printf_error("vkCreateFramebuffer unsuccessful (%i)", res);
+		return;
+	}
+	
+	VkCommandBufferBeginInfo command_buffer_begin_info = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = NULL,
+		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		.pInheritanceInfo = NULL,
+	};
+	
+	vk_BeginCommandBuffer(vk_cmdbufs_graphics[current_image_index], &command_buffer_begin_info);
+	
+	VkImageSubresourceRange image_subresource_range = {
+		VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1
+	};
+	
+	if (vk_queue_present != vk_queue_graphics) {
+      VkImageMemoryBarrier barrier_from_present_to_draw = {
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,           // VkStructureType                        sType
+        NULL,                                          // const void                            *pNext
+        VK_ACCESS_MEMORY_READ_BIT,                        // VkAccessFlags                          srcAccessMask
+        VK_ACCESS_MEMORY_READ_BIT,                        // VkAccessFlags                          dstAccessMask
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,                  // VkImageLayout                          oldLayout
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,                  // VkImageLayout                          newLayout
+		vk_queue_index_present,                    // uint32_t                               srcQueueFamilyIndex
+        vk_queue_index_graphics,                   // uint32_t                               dstQueueFamilyIndex
+        vk_swapchain_images[current_image_index],                          // VkImage                                image
+        image_subresource_range                           // VkImageSubresourceRange                subresourceRange
+      };
+      vk_CmdPipelineBarrier( vk_cmdbufs_graphics[current_image_index], VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0, NULL, 1, &barrier_from_present_to_draw );
+	}
+	
+    VkClearValue clear_value = {
+      .color = {{ 1.0f, 0.8f, 0.4f, 0.0f}},                         // VkClearColorValue                      color
+    };
+	
+    VkRenderPassBeginInfo render_pass_begin_info = {
+      VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,           // VkStructureType                        sType
+      NULL,                                            // const void                            *pNext
+      vk_renderpass,                                  // VkRenderPass                           renderPass
+      vk_framebuffers[current_image_index],                                        // VkFramebuffer                          framebuffer
+      {                                                   // VkRect2D                               renderArea
+        {                                                 // VkOffset2D                             offset
+          0,                                                // int32_t                                x
+          0                                                 // int32_t                                y
+        },
+	  {800, 600},                            // VkExtent2D                             extent;
+      },
+      1,                                                  // uint32_t                               clearValueCount
+      &clear_value                                        // const VkClearValue                    *pClearValues
+    };
+
+    vk_CmdBeginRenderPass( vk_cmdbufs_graphics[current_image_index], &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE );
+
+    vk_CmdBindPipeline( vk_cmdbufs_graphics[current_image_index], VK_PIPELINE_BIND_POINT_GRAPHICS, vk_graphics_pipeline );
+	
+    VkViewport viewport = {
+      0.0f,                                               // float                                  x
+      0.0f,                                               // float                                  y
+      800,    // float                                  width
+      600,   // float                                  height
+      0.0f,                                               // float                                  minDepth
+      1.0f                                                // float                                  maxDepth
+    };
+
+    VkRect2D scissor = {
+      {                                                   // VkOffset2D                             offset
+        0,                                                  // int32_t                                x
+        0                                                   // int32_t                                y
+      },
+      {                                                   // VkExtent2D                             extent
+        800,                        // uint32_t                               width
+        600                        // uint32_t                               height
+      }
+    };
+	
+    vk_CmdSetViewport( vk_cmdbufs_graphics[current_image_index], 0, 1, &viewport );
+    vk_CmdSetScissor( vk_cmdbufs_graphics[current_image_index], 0, 1, &scissor );
+	
+    VkDeviceSize offset = 0;
+    vk_CmdBindVertexBuffers( vk_cmdbufs_graphics[current_image_index], 0, 1, &vk_testv_buffer, &offset );
+
+    vk_CmdDraw( vk_cmdbufs_graphics[current_image_index], 3, 1, 0, 0 );
+
+    vk_CmdEndRenderPass( vk_cmdbufs_graphics[current_image_index] );
+	
+    if( vk_queue_graphics != vk_queue_present ) {
+      VkImageMemoryBarrier barrier_from_draw_to_present = {
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,           // VkStructureType                        sType
+        NULL,                                          // const void                            *pNext
+        VK_ACCESS_MEMORY_READ_BIT,                        // VkAccessFlags                          srcAccessMask
+        VK_ACCESS_MEMORY_READ_BIT,                        // VkAccessFlags                          dstAccessMask
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,                  // VkImageLayout                          oldLayout
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,                  // VkImageLayout                          newLayout
+        vk_queue_index_graphics,                   // uint32_t                               srcQueueFamilyIndex
+        vk_queue_index_present,                    // uint32_t                               dstQueueFamilyIndex
+        vk_swapchain_images[current_image_index],                          // VkImage                                image
+        image_subresource_range                           // VkImageSubresourceRange                subresourceRange
+      };
+      vk_CmdPipelineBarrier( vk_cmdbufs_graphics[current_image_index], VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &barrier_from_draw_to_present );
+    }
+	
+	res = vk_EndCommandBuffer(vk_cmdbufs_graphics[current_image_index]);
+	if (res != VK_SUCCESS) {
+		com_printf_error("vkEndCommandBuffer unsuccessful (%i)", res);
+		return;
+	}
+	
+	VkPipelineStageFlags wait_dst_stage_mask = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
     VkSubmitInfo submit_info = {
 		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 		.pNext = NULL,
@@ -1065,7 +1257,7 @@ void com_vk_swap (void) {
 		.pSignalSemaphores = &vk_sem_rndcomp
     };
 	
-	res = vk_QueueSubmit(vk_queue_present, 1, &submit_info, NULL);
+	res = vk_QueueSubmit(vk_queue_present, 1, &submit_info, f1);
 	if (res != VK_SUCCESS) {
 		com_printf_error("vkQueueSubmit unsuccessful (%i)", res);
 		return;
@@ -1087,5 +1279,12 @@ void com_vk_swap (void) {
 		com_printf_error("vkQueuePresentKHR unsuccessful (%i)", res);
 		return;
 	};
+	
+	vk_QueueSubmit(vk_queue_present, 0, NULL, f1);
+	vk_WaitForFences(vk_device, 1, &f1, VK_TRUE, UINT64_MAX);
+	vk_DestroyFence(vk_device, f1, NULL);
+	
+	t++;
+	com_printf("%u", t);
 
 }
