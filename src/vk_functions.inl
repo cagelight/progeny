@@ -1,21 +1,34 @@
 
-#ifdef VK_FN_DECL
-#undef VK_FN_DECL
+#ifdef VK_FN_IDECL
+#undef VK_FN_IDECL
 
-#define VK_TOP_PROC( func ) PFN_vk##func vk_##func;
-#define VK_GLOBAL_PROC( func ) PFN_vk##func vk_##func;
-#define VK_INSTANCE_PROC( func ) PFN_vk##func vk_##func;
-#define VK_DEVICE_PROC( func ) PFN_vk##func vk_##func;
+#define VK_TOP_PROC( func ) PFN_vk##func vk##func;
+#define VK_GLOBAL_PROC( func ) PFN_vk##func vk##func;
+#define VK_INSTANCE_PROC( func ) PFN_vk##func vk##func;
+#define VK_DEVICE_PROC( func )
+#define VK_SWAPCHAIN_PROC( func )
+
+#endif
+
+#ifdef VK_FN_DDECL
+#undef VK_FN_DDECL
+
+#define VK_TOP_PROC( func )
+#define VK_GLOBAL_PROC( func )
+#define VK_INSTANCE_PROC( func )
+#define VK_DEVICE_PROC( func ) PFN_vk##func vk##func;
+#define VK_SWAPCHAIN_PROC( func ) PFN_vk##func vk##func;
 
 #endif
 
 #ifdef VK_FN_SYM_GLOBAL
 #undef VK_FN_SYM_GLOBAL
 
-#define VK_TOP_PROC( func ) vk_##func = (PFN_vk##func)dlsym(vk_handle, "vk"#func); if (!vk_##func) { com_printf_error("could not find required top level symbol \"%s\" in loaded vulkan library", "vk"#func); return false; }
-#define VK_GLOBAL_PROC( func ) vk_##func = (PFN_vk##func)vk_GetInstanceProcAddr(NULL, "vk"#func); if (!vk_##func) { com_printf_error("could not find required instance level symbol \"%s\" in loaded vulkan library", "vk"#func); return false; }
+#define VK_TOP_PROC( func ) vk##func = reinterpret_cast<PFN_vk##func>(dlsym(vk_handle, "vk"#func)); if (!vk##func) srcthrow("could not find vk"#func" in loaded vulkan library");
+#define VK_GLOBAL_PROC( func ) vk##func = (PFN_vk##func)vkGetInstanceProcAddr(NULL, "vk"#func); if (!vk##func) srcthrow("could not acquire required instance level function vk"#func" from vkGetInstanceProcAddr");
 #define VK_INSTANCE_PROC( func )
 #define VK_DEVICE_PROC( func )
+#define VK_SWAPCHAIN_PROC( func )
 
 #endif
 
@@ -24,8 +37,9 @@
 
 #define VK_TOP_PROC( func )
 #define VK_GLOBAL_PROC( func )
-#define VK_INSTANCE_PROC( func ) vk_##func = (PFN_vk##func)vk_GetInstanceProcAddr(vk_instance, "vk"#func); if (!vk_##func) { com_printf_error("could not find required instance level symbol \"%s\" in loaded vulkan library", "vk"#func); return false; }
+#define VK_INSTANCE_PROC( func ) vk##func = (PFN_vk##func)vkGetInstanceProcAddr(vk_instance, "vk"#func); if (!vk##func) srcthrow("could not acquire required instance level function vk"#func" from vkGetInstanceProcAddr");
 #define VK_DEVICE_PROC( func )
+#define VK_SWAPCHAIN_PROC( func )
 
 #endif
 
@@ -35,7 +49,19 @@
 #define VK_TOP_PROC( func )
 #define VK_GLOBAL_PROC( func )
 #define VK_INSTANCE_PROC( func )
-#define VK_DEVICE_PROC( func ) vk_##func = (PFN_vk##func)vk_GetDeviceProcAddr(vk_device, "vk"#func); if (!vk_##func) { com_printf_error("could not find required device level symbol \"%s\" in loaded vulkan library", "vk"#func); return false; }
+#define VK_DEVICE_PROC( func ) dev.vk##func = (PFN_vk##func)vkGetDeviceProcAddr(dev.handle, "vk"#func); if (!dev.vk##func) srcthrow("could not acquire required instance level function vk"#func" from vkGetInstanceProcAddr");
+#define VK_SWAPCHAIN_PROC( func )
+
+#endif
+
+#ifdef VK_FN_SYM_SWAPCHAIN
+#undef VK_FN_SYM_SWAPCHAIN
+
+#define VK_TOP_PROC( func )
+#define VK_GLOBAL_PROC( func )
+#define VK_INSTANCE_PROC( func )
+#define VK_DEVICE_PROC( func ) 
+#define VK_SWAPCHAIN_PROC( func ) dev->vk##func = (PFN_vk##func)vkGetDeviceProcAddr(dev->vk_device, "vk"#func); if (!dev->vk##func) { com_printf_error("could not find required device level symbol \"%s\" in loaded vulkan library", "vk"#func); goto finalize; }
 
 #endif
 
@@ -60,7 +86,8 @@ VK_INSTANCE_PROC( GetPhysicalDeviceFeatures )
 VK_INSTANCE_PROC( GetPhysicalDeviceQueueFamilyProperties )
 VK_INSTANCE_PROC( CreateDevice )
 VK_INSTANCE_PROC( GetDeviceProcAddr )
-VK_INSTANCE_PROC( EnumerateDeviceExtensionProperties )
+VK_INSTANCE_PROC( EnumerateDeviceExtensionProperties ) 
+VK_INSTANCE_PROC( EnumerateDeviceLayerProperties )
 VK_INSTANCE_PROC( GetPhysicalDeviceMemoryProperties )
 
 //Surface Extension
@@ -72,6 +99,13 @@ VK_INSTANCE_PROC( GetPhysicalDeviceSurfacePresentModesKHR )
 
 //XCB Extension
 VK_INSTANCE_PROC( CreateXcbSurfaceKHR )
+
+//Debug Extension
+#ifdef PROGENY_VK_DEBUG
+VK_INSTANCE_PROC( CreateDebugReportCallbackEXT )
+VK_INSTANCE_PROC( DebugReportMessageEXT )
+VK_INSTANCE_PROC( DestroyDebugReportCallbackEXT )
+#endif
 
 //================================================================
 //----------------------------------------------------------------
@@ -128,13 +162,14 @@ VK_DEVICE_PROC( WaitForFences )
 VK_DEVICE_PROC( FlushMappedMemoryRanges )
 VK_DEVICE_PROC( CmdSetViewport )
 VK_DEVICE_PROC( CmdSetScissor )
+VK_DEVICE_PROC( QueueWaitIdle )
 
 //Swapchain Extension
-VK_DEVICE_PROC( CreateSwapchainKHR )
-VK_DEVICE_PROC( DestroySwapchainKHR )
-VK_DEVICE_PROC( GetSwapchainImagesKHR )
-VK_DEVICE_PROC( AcquireNextImageKHR )
-VK_DEVICE_PROC( QueuePresentKHR )
+VK_SWAPCHAIN_PROC( CreateSwapchainKHR )
+VK_SWAPCHAIN_PROC( DestroySwapchainKHR )
+VK_SWAPCHAIN_PROC( GetSwapchainImagesKHR )
+VK_SWAPCHAIN_PROC( AcquireNextImageKHR )
+VK_SWAPCHAIN_PROC( QueuePresentKHR )
 
 //================================================================
 //----------------------------------------------------------------
@@ -144,3 +179,4 @@ VK_DEVICE_PROC( QueuePresentKHR )
 #undef VK_GLOBAL_PROC
 #undef VK_INSTANCE_PROC
 #undef VK_DEVICE_PROC
+#undef VK_SWAPCHAIN_PROC

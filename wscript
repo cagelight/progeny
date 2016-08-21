@@ -9,7 +9,7 @@ out = 'build'
 projname = 'progeny'
 coreprog_name = projname
 
-g_cflags = ["-Wall", "-Wextra", "-std=gnu11"]
+g_cflags = ["-Wall", "-Wextra", "-std=c++17"]
 def btype_cflags(ctx):
 	return {
 		"DEBUG"   : g_cflags + ["-Og", "-ggdb3", "-march=core2", "-mtune=native"],
@@ -18,11 +18,11 @@ def btype_cflags(ctx):
 	}.get(ctx.env.BUILD_TYPE, g_cflags)
 
 def options(opt):
-	opt.load("gcc")
+	opt.load("g++")
 	opt.add_option('--build_type', dest='build_type', type="string", default='RELEASE', action='store', help="DEBUG, NATIVE, RELEASE")
 
 def configure(ctx):
-	ctx.load("gcc")
+	ctx.load("g++")
 	ctx.check(features='c cprogram', lib='dl', uselib_store='DL')
 	ctx.check(features='c cprogram', lib='xcb', uselib_store='XCB')
 	ctx.check(features='c cprogram', lib='jemalloc', uselib_store='JMAL')
@@ -30,20 +30,19 @@ def configure(ctx):
 	if btup in ["DEBUG", "NATIVE", "RELEASE"]:
 		Logs.pprint("PINK", "Setting up environment for known build type: " + btup)
 		ctx.env.BUILD_TYPE = btup
-		ctx.env.CFLAGS = btype_cflags(ctx)
-		Logs.pprint("PINK", "CFLAGS: " + ' '.join(ctx.env.CFLAGS))
+		ctx.env.CXXFLAGS = btype_cflags(ctx)
+		Logs.pprint("PINK", "CXXFLAGS: " + ' '.join(ctx.env.CXXFLAGS))
 		if btup == "DEBUG":
 			ctx.define("PROGENY_DEBUG", 1)
 	else:
 		Logs.error("UNKNOWN BUILD TYPE: " + btup)
 
 def build(bld):
-	files =  bld.path.ant_glob('src/*.c')
+	files =  bld.path.ant_glob('src/*.cpp')
 	coreprog = bld (
-		features = "c cprogram",
+		features = "cxx cxxprogram",
 		target = coreprog_name,
 		source = files,
-#		lib = ["pthread"],
 		uselib = ['XCB', 'DL', 'JMAL']
 	)
 	
