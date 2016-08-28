@@ -1,13 +1,13 @@
 #pragma once
 #include "com.hpp"
-#include "context.hpp"
+#include "vk.hpp"
 
 namespace control {
+	
 	void init();
 	void term() noexcept;
 	void frame();
-	
-	NativeSurfaceCreateInfo vk_surface_create_info();
+	VkExtent2D extent() noexcept;
 	
 	extern std::atomic_bool run_sem;
 }

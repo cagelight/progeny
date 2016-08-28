@@ -5,10 +5,11 @@ constexpr uint32_t vk::device::capability::compute;
 constexpr uint32_t vk::device::capability::graphics;
 constexpr uint32_t vk::device::capability::presentable;
 
-vk::device::logical_device_initializer::logical_device_initializer(physical_device const & pdev, capability_set const & caps) : parent(pdev) {
+vk::device::initializer::initializer(physical_device const & pdev, capability_set const & caps) : parent(pdev) {
 	this->create_infos.resize(pdev.queue_families.size());
 	this->queue_priorities.resize(pdev.queue_families.size());
 	this->queues.resize(caps.size());
+	this->queue_indicies.resize(caps.size());
 	for (uint32_t i = 0; i < pdev.queue_families.size(); i++) {
 		this->create_infos[i].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 		this->create_infos[i].pNext = nullptr;
@@ -27,11 +28,12 @@ vk::device::logical_device_initializer::logical_device_initializer(physical_devi
 			if (caps[c] & capability::transfer && !(pdev.queue_families[i].queueFlags | VK_QUEUE_TRANSFER_BIT)) continue;
 			if (caps[c] & capability::presentable && !pdev.queue_families_presentable[i]) continue;
 			if (create_infos[i].queueCount == pdev.queue_families[i].queueCount) continue;
+			queue_indicies[i] = create_infos[i].queueCount;
 			create_infos[i].queueCount++;
 			queue_priorities[i].emplace_back(caps[c] == capability::transfer ? 0.5f : 1.0f);
 			queues[c].cap_flags = caps[c];
 			queues[c].queue_family = i;
-			queues[c].queue = VK_NULL_HANDLE;
+			queues[c].handle = VK_NULL_HANDLE;
 			queue_found = true;
 			overall_capability |= caps[c];
 			break;
@@ -75,8 +77,7 @@ vk::device::logical_device_initializer::logical_device_initializer(physical_devi
 	}
 }
 
-
-vk::device::device(logical_device_initializer & ldi) : parent(ldi.parent), queues(std::move(ldi.queues)), overall_capability(ldi.overall_capability), device_extensions(std::move(ldi.device_extensions)), device_layers(std::move(ldi.device_layers)) {
+vk::device::device(initializer & ldi) : parent(ldi.parent), queues(std::move(ldi.queues)), overall_capability(ldi.overall_capability), device_extensions(std::move(ldi.device_extensions)), device_layers(std::move(ldi.device_layers)) {
 	
 	VkDeviceCreateInfo device_create_info = {
 		.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -84,17 +85,26 @@ vk::device::device(logical_device_initializer & ldi) : parent(ldi.parent), queue
 		.flags = 0,
 		.queueCreateInfoCount = static_cast<uint32_t>(ldi.create_infos.size()),
 		.pQueueCreateInfos = ldi.create_infos.data(),
-		.enabledLayerCount = static_cast<uint32_t>(ldi.device_layers.size()),
-		.ppEnabledLayerNames = ldi.device_layers.data(),
-		.enabledExtensionCount = static_cast<uint32_t>(ldi.device_extensions.size()),
-		.ppEnabledExtensionNames = ldi.device_extensions.data(),
+		.enabledLayerCount = static_cast<uint32_t>(device_layers.size()),
+		.ppEnabledLayerNames = device_layers.data(),
+		.enabledExtensionCount = static_cast<uint32_t>(device_extensions.size()),
+		.ppEnabledExtensionNames = device_extensions.data(),
 		.pEnabledFeatures = NULL,
 	};
 	handle = vk::instance::create_device(parent, &device_create_info);
 	vk::instance::resolve_device_symbols(*this);
+	
+	for (size_t i = 0; i < queues.size(); i++) {
+		vkGetDeviceQueue(handle, queues[i].queue_family, ldi.queue_indicies[i], &queues[i].handle);
+		assert(queues[i].handle != VK_NULL_HANDLE);
+	}
+	
 }
 
 vk::device::~device() {
+	if (swapchain::get_device() == this) {
+		swapchain::term();
+	}
 	if (this->handle && this->vkDestroyDevice) {
 		this->vkDestroyDevice(handle, nullptr);
 	}

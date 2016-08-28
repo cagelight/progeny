@@ -1,10 +1,11 @@
 #!/bin/python
 
 from waflib import *
-import os, sys
+import os, sys, traceback, subprocess, binascii
 
 top = '.'
 out = 'build'
+shad = 'shad'
 
 projname = 'progeny'
 coreprog_name = projname
@@ -36,14 +37,45 @@ def configure(ctx):
 			ctx.define("PROGENY_DEBUG", 1)
 	else:
 		Logs.error("UNKNOWN BUILD TYPE: " + btup)
-
+		
+def shaders(ctx):
+	
+	ret = subprocess.call(['mkdir','-p',os.path.join(top, out, shad)])
+	
+	if ret != 0:
+		raise ctx.errors.WafError("shaders: could not create output directory")
+	
+	df = open(os.path.join(top, out, shad, 'shaders.cpp'), 'wb')
+	df.write("#include \"vk.hpp\"\n\n".encode())
+	
+	for f in os.listdir(os.path.join(top, shad)):
+		fs = f.split('.')
+		proc = subprocess.Popen(['glslangValidator','-V',os.path.join(top, shad, f),'-o',os.path.join(top, out, shad, 'temp.spv')], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		pout, perr = proc.communicate()
+		if proc.returncode != 0:
+			raise ctx.errors.WafError("shaders: glsl shader failed to compile: \nstdout: " + pout.decode("utf-8") + "\n\nstderr: " + perr.decode("utf-8"))
+		spvf = open(os.path.join(top, out, shad, 'temp.spv'), 'rb')
+		
+		data = spvf.read()
+		datas = list(data)
+		dataf = ""
+		for b in datas:
+			dataf += ("0x{0:02x}, ".format(b))
+		
+		df.write("uint8_t const {0} [] = {{{1}}};\n".format("vk::spirv::{0}_{1}".format(fs[1], fs[0]), dataf).encode())
+		df.write("size_t {0}_size = {1};\n".format("vk::spirv::{0}_{1}".format(fs[1], fs[0]), len(data)).encode())
+		Logs.pprint("YELLOW", "shader \"{0}\" compiled successfully to SPIR-V and hardcoded to shaders.cpp ({1}, {2})".format(f, "vk::spirv::{0}_{1}".format(fs[1], fs[0]), "vk::spirv::{0}_{1}_size".format(fs[1], fs[0])))
+		
 def build(bld):
 	files =  bld.path.ant_glob('src/*.cpp')
+	files += [os.path.join(top, out, shad, 'shaders.cpp')]
+	
 	coreprog = bld (
 		features = "cxx cxxprogram",
 		target = coreprog_name,
 		source = files,
-		uselib = ['XCB', 'DL', 'JMAL']
+		uselib = ['XCB', 'DL', 'JMAL'],
+		includes = os.path.join(top, 'src'),
 	)
 	
 def clean(ctx):

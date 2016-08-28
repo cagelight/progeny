@@ -8,7 +8,7 @@ static xcb_window_t com_xcb_window = 0;
 static xcb_intern_atom_cookie_t delete_cookie;
 static xcb_intern_atom_reply_t * delete_reply = NULL;
 
-uint32_t xcb_current_width = 800, xcb_current_height = 600;
+VkExtent2D current_extent {800, 600};
 
 void control::init() {
 	com_xcb_connection = xcb_connect( NULL, NULL );
@@ -18,7 +18,7 @@ void control::init() {
 	xcb_screen_t * xcb_screen = xcb_screen_iter.data;
 	com_xcb_window = xcb_generate_id( com_xcb_connection );
 	uint32_t value_list[] = { 0x00004080, XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_STRUCTURE_NOTIFY };
-	xcb_create_window( com_xcb_connection, XCB_COPY_FROM_PARENT, com_xcb_window, xcb_screen->root, 0, 0, xcb_current_width, xcb_current_height, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT, xcb_screen->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, value_list );
+	xcb_create_window( com_xcb_connection, XCB_COPY_FROM_PARENT, com_xcb_window, xcb_screen->root, 0, 0, current_extent.width, current_extent.height, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT, xcb_screen->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, value_list );
 	
 	xcb_intern_atom_cookie_t protocols_cookie = xcb_intern_atom( com_xcb_connection, 1, 12, "WM_PROTOCOLS" );
 	xcb_intern_atom_reply_t * protocols_reply = xcb_intern_atom_reply( com_xcb_connection, protocols_cookie, 0 );
@@ -51,10 +51,10 @@ void control::frame() {
 		case XCB_CONFIGURE_NOTIFY: {
 			//xcb_expose_event_t * cev; //TODO - vulkan swapchain refresh on resize
 			xcb_configure_notify_event_t * nev = (xcb_configure_notify_event_t *)event;
-			if (nev->width != xcb_current_width || nev->height != xcb_current_height) {
-				xcb_current_width = nev->width;
-				xcb_current_height = nev->height;
-				//com_vk_swapchain_reinit();
+			if (nev->width != current_extent.width || nev->height != current_extent.height) {
+				current_extent.width = nev->width;
+				current_extent.height = nev->height;
+				vk::swapchain::reinit();
 			}
 			break;
 		}
@@ -78,7 +78,11 @@ void control::frame() {
 	goto handle_events;
 }
 
-NativeSurfaceCreateInfo control::vk_surface_create_info() {
+VkExtent2D control::extent() noexcept {
+	return current_extent;
+}
+
+NativeSurfaceCreateInfo vk::surface::create_info() {
 	return {
 		.sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
 		.pNext = NULL,

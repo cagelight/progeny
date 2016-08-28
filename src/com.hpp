@@ -14,12 +14,19 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdint>
+#include <memory>
 
 namespace com {
 	
 	void init();
 	void term() noexcept;
 	void frame();
+	
+	namespace test {
+		void init();
+		void term() noexcept;
+		void frame();
+	}
 	
 	std::string strf(char const * fmt, ...) noexcept;
 	
@@ -31,6 +38,7 @@ namespace com {
 	struct exception {
 		std::string msg;
 		
+		exception() = delete;
 		exception(char const * str) : msg(str) {}
 		exception(std::string & str) : msg(str) {}
 		exception(std::string && str) : msg(str) {}

@@ -24,10 +24,16 @@ static constexpr size_t instance_layers_count = sizeof(instance_layers) / sizeof
 
 static void * vk_handle = nullptr;
 static VkInstance vk_instance = VK_NULL_HANDLE;
-VkSurfaceKHR vk::surface = VK_NULL_HANDLE;
-
 static std::vector<vk::physical_device> physical_devices;
 
+//================================================================
+VkSurfaceKHR vk::surface::handle = VK_NULL_HANDLE;
+static VkSurfaceCapabilitiesKHR surface_capabilities;
+static std::vector<VkSurfaceFormatKHR> surface_formats;
+static std::vector<VkPresentModeKHR> surface_present_modes;
+VkSurfaceCapabilitiesKHR const & vk::surface::capabilities {surface_capabilities};
+std::vector<VkSurfaceFormatKHR> const & vk::surface::formats {surface_formats};
+std::vector<VkPresentModeKHR> const & vk::surface::present_modes {surface_present_modes};
 //================================================================
 template <typename FUNC> FUNC vk_instance_func(char const * symbol) {
 	FUNC f = reinterpret_cast<FUNC>(vkGetInstanceProcAddr(vk_instance, symbol));
@@ -101,8 +107,8 @@ void vk::instance::init() {
 	#define VK_FN_SYM_INSTANCE
 	#include "vk_functions.inl"
 	
-	NativeSurfaceCreateInfo surface_create_info = control::vk_surface_create_info();
-	VKR(vkCreateXcbSurfaceKHR(vk_instance, &surface_create_info, NULL, &vk::surface))
+	NativeSurfaceCreateInfo surface_create_info = vk::surface::create_info();
+	VKR(vkCreateXcbSurfaceKHR(vk_instance, &surface_create_info, NULL, &vk::surface::handle))
 	
 	uint32_t pdev_cnt;
 	VKR(vkEnumeratePhysicalDevices(vk_instance, &pdev_cnt, NULL))
@@ -121,9 +127,9 @@ void vk::instance::init() {
 }
 
 void vk::instance::term() noexcept {
-	if (vk::surface) {
-		vkDestroySurfaceKHR(vk_instance, vk::surface, nullptr);
-		vk::surface = VK_NULL_HANDLE;
+	if (vk::surface::handle) {
+		vkDestroySurfaceKHR(vk_instance, vk::surface::handle, nullptr);
+		vk::surface::handle = VK_NULL_HANDLE;
 	}
 	if (vk_instance) {
 		vkDestroyInstance(vk_instance, nullptr);
@@ -144,6 +150,11 @@ VkDevice vk::instance::create_device(physical_device const & pdev, VkDeviceCreat
 void vk::instance::resolve_device_symbols(device & dev) {
 	#define VK_FN_SYM_DEVICE
 	#include "vk_functions.inl"
+	
+	if (dev.overall_capability & device::capability::presentable) {
+		#define VK_FN_SYM_SWAPCHAIN
+		#include "vk_functions.inl"
+	}
 }
 
 vk::physical_device::physical_device(VkPhysicalDevice & handle) : handle(handle) {
@@ -163,7 +174,7 @@ vk::physical_device::physical_device(VkPhysicalDevice & handle) : handle(handle)
 	
 	this->queue_families_presentable.resize(num);
 	for (uint32_t i = 0; i < this->queue_families.size(); i++) {
-		vkGetPhysicalDeviceSurfaceSupportKHR(handle, i, vk::surface, &this->queue_families_presentable[i]);
+		vkGetPhysicalDeviceSurfaceSupportKHR(handle, i, vk::surface::handle, &this->queue_families_presentable[i]);
 	}
 	
 	bool has_dmt = false;
@@ -197,4 +208,16 @@ vk::physical_device::physical_device(VkPhysicalDevice & handle) : handle(handle)
 
 std::vector<vk::physical_device> const & vk::get_physical_devices() {
 	return physical_devices;
+}
+
+void vk::surface::setup(physical_device const & pdev) {
+	VkResult res;
+	uint32_t num;
+	VKR(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(pdev.handle, handle, &surface_capabilities))
+	VKR(vkGetPhysicalDeviceSurfaceFormatsKHR(pdev.handle, handle, &num, NULL))
+	surface_formats.resize(num);
+	VKR(vkGetPhysicalDeviceSurfaceFormatsKHR(pdev.handle, handle, &num, surface_formats.data()))
+	VKR(vkGetPhysicalDeviceSurfacePresentModesKHR(pdev.handle, handle, &num, NULL))
+	surface_present_modes.resize(num);
+	VKR(vkGetPhysicalDeviceSurfacePresentModesKHR(pdev.handle, handle, &num, surface_present_modes.data()))
 }

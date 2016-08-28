@@ -1,7 +1,13 @@
 #pragma once
 
 #include "com.hpp"
-#include "context.hpp"
+
+#pragma once
+#define VK_NO_PROTOTYPES
+#define VK_USE_PLATFORM_XCB_KHR
+#include <vulkan/vulkan.h>
+
+typedef VkXcbSurfaceCreateInfoKHR NativeSurfaceCreateInfo;
 
 #ifdef PROGENY_DEBUG
 #define PROGENY_VK_DEBUG
@@ -35,8 +41,28 @@ namespace vk {
 		void resolve_device_symbols(device &);
 	}
 	
+	namespace surface {
+		extern VkSurfaceKHR handle;
+		extern VkSurfaceCapabilitiesKHR const & capabilities;
+		extern std::vector<VkSurfaceFormatKHR> const & formats;
+		extern std::vector<VkPresentModeKHR> const & present_modes;
+		void setup(physical_device const &);
+		NativeSurfaceCreateInfo create_info();
+	}
+	
 	std::vector<vk::physical_device> const & get_physical_devices();
-	extern VkSurfaceKHR surface;
+	
+	namespace swapchain {
+		extern VkFormat format;
+		
+		device const * get_device() noexcept;
+		void init(device &);
+		void reinit(); // window size change, swap method change, etc.
+		void term() noexcept;
+		
+		VkFramebuffer begin_frame(VkRenderPass);
+		void end_frame(VkSemaphore);
+	}
 	
 	struct device {
 		
@@ -53,46 +79,72 @@ namespace vk {
 			std::sort(set.begin(), set.end(), [](capability::flags a, capability::flags b){return a>b;});
 		}
 		
-		struct device_queue {
+		struct queue {
 			capability::flags cap_flags;
 			uint32_t queue_family;
-			VkQueue queue;
+			VkQueue handle;
 		};
 		
-		typedef std::vector<device_queue> device_queue_set;
+		typedef std::vector<queue> queue_set;
 		
-		struct logical_device_initializer {
+		struct initializer {
 			physical_device const & parent;
 			std::vector<VkDeviceQueueCreateInfo> create_infos;
 			std::vector<std::vector<float>> queue_priorities;
-			device_queue_set queues;
-			capability::flags overall_capability;
+			queue_set queues;
+			std::vector<uint32_t> queue_indicies;
+			capability::flags overall_capability = 0;
 			std::vector<char const *> device_extensions;
 			std::vector<char const *> device_layers {
-			#ifdef PROGENY_DEBUG
+			#ifdef PROGENY_VK_DEBUG
 				"VK_LAYER_LUNARG_standard_validation",
 			#endif
 			};
 			
-			logical_device_initializer() = delete;
-			logical_device_initializer(physical_device const &, capability_set const &);
+			initializer() = delete;
+			initializer(physical_device const &, capability_set const &);
 		};
 		
 		VkDevice handle;
 		physical_device const & parent;
-		device_queue_set queues;
+		queue_set queues;
 		capability::flags overall_capability;
 		std::vector<char const *> device_extensions;
 		std::vector<char const *> device_layers;
 		#define VK_FN_DDECL
 		#include "vk_functions.inl"
 		
-		device() = delete;
-		device(logical_device_initializer &);
+		device() = default;
+		device(initializer &);
 		device(device const &) = delete;
-		device & operator = (device const &) = delete;
 		device(device &&) = default;
+		
+		device & operator = (device const &) = delete;
+		bool operator == (device const & other) {return this->handle == other.handle;}
 		
 		~device();
 	};
+	
+	struct shader {
+		VkShaderModule handle;
+		device const & parent;
+		
+		shader() = delete;
+		shader(device const & parent, uint8_t const * spv, size_t spv_len);
+		shader(shader const &) = delete;
+		shader(shader &&) = default;
+		
+		shader & operator = (shader const &) = delete;
+		
+		~shader();
+	};
+	
+	namespace spirv {
+		extern uint8_t const vert_test [];
+		extern size_t vert_test_size;
+		extern uint8_t const frag_test [];
+		extern size_t frag_test_size;
+	}
 }
+
+#define VKR(call) res = call; if (res != VK_SUCCESS) srcthrow("\"%s\" unsuccessful: (%i)", #call, res);

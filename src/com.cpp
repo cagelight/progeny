@@ -8,18 +8,8 @@ void com::init() {
 	try {
 		
 		control::init();
-	
 		vk::instance::init();
-		
-		vk::physical_device const & pdev = vk::get_physical_devices()[0];
-		
-		vk::device::capability_set qset;
-		qset.emplace_back(vk::device::capability::graphics | vk::device::capability::presentable);
-		qset.emplace_back(vk::device::capability::transfer);
-		vk::device::capability_sort(qset);
-		
-		vk::device::logical_device_initializer ldi {pdev, qset};
-		vk::device dev {ldi};
+		com::test::init();
 		
 	} catch (com::exception & e) {
 		com::print(e.msg);
@@ -29,12 +19,14 @@ void com::init() {
 }
 
 void com::term() noexcept {
+	com::test::term();
 	vk::instance::term();
 	control::term();
 }
 
 void com::frame() {
 	control::frame();
+	com::test::frame();
 }
 
 static constexpr size_t strf_startlen = 1024;

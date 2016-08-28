@@ -61,7 +61,7 @@
 #define VK_GLOBAL_PROC( func )
 #define VK_INSTANCE_PROC( func )
 #define VK_DEVICE_PROC( func ) 
-#define VK_SWAPCHAIN_PROC( func ) dev->vk##func = (PFN_vk##func)vkGetDeviceProcAddr(dev->vk_device, "vk"#func); if (!dev->vk##func) { com_printf_error("could not find required device level symbol \"%s\" in loaded vulkan library", "vk"#func); goto finalize; }
+#define VK_SWAPCHAIN_PROC( func ) dev.vk##func = (PFN_vk##func)vkGetDeviceProcAddr(dev.handle, "vk"#func); if (!dev.vk##func) srcthrow("could not acquire required instance level function vk"#func" from vkGetInstanceProcAddr");
 
 #endif
 

@@ -8,7 +8,8 @@ cd "$DIR"
 ./waf \
 	--build_type=debug \
 	configure
-	
+
+./waf shaders
 ./waf build
 ./waf install
 ./waf clean
