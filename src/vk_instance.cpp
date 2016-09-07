@@ -177,34 +177,196 @@ vk::physical_device::physical_device(VkPhysicalDevice & handle) : handle(handle)
 		vkGetPhysicalDeviceSurfaceSupportKHR(handle, i, vk::surface::handle, &this->queue_families_presentable[i]);
 	}
 	
-	bool has_dmt = false;
-	VkMemoryPropertyFlags best_smt = 0;
-	for (uint32_t i = 0; i < this->memory_properties.memoryTypeCount; i++) {
-		if ((this->memory_properties.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) == (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
-			this->memory_index_staging = i;
-			this->memory_index_device = i;
-			best_smt = this->memory_properties.memoryTypes[i].propertyFlags;
-			has_dmt = true;
-			break;
+	struct best_mem {
+		physical_device const & parent;
+		uint32_t index;
+		VkMemoryType const * type = nullptr;
+		VkMemoryHeap const * heap = nullptr;
+		
+		operator bool() {return type && heap;}
+		best_mem(physical_device const & parent, uint32_t i) : parent(parent), index(i), type(&parent.memory_properties.memoryTypes[i]), heap(&parent.memory_properties.memoryHeaps[type->heapIndex]) {}
+		void set(uint32_t new_index) {
+			index = new_index;
+			type = &parent.memory_properties.memoryTypes[index];
+			heap = &parent.memory_properties.memoryHeaps[type->heapIndex];
 		}
-		if (!has_dmt && (this->memory_properties.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))) {
-			this->memory_index_device = i;
-			has_dmt = true;
-		}
-		if (!best_smt && (this->memory_properties.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))) {
-			this->memory_index_staging = i;
-			best_smt = this->memory_properties.memoryTypes[i].propertyFlags;
-		}
-		if (!(best_smt & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) && ((this->memory_properties.memoryTypes[i].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) == (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT))) {
-			this->memory_index_staging = i;
-			best_smt = this->memory_properties.memoryTypes[i].propertyFlags;
-		}
+	};
+	
+	best_mem best_host_large {*this, 0};
+	best_mem best_staging {*this, 0};
+	best_mem best_device_ideal {*this, 0};
+	best_mem best_device_large {*this, 0};
+	
+	for (uint32_t i = 1; i < this->memory_properties.memoryTypeCount; i++) {
+		VkMemoryType & type = this->memory_properties.memoryTypes[i];
+		VkMemoryHeap & heap = this->memory_properties.memoryHeaps[type.heapIndex];
+		
+		do { //host_large
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != (best_host_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) best_host_large.set(i);
+				break;
+			}
+			if (heap.size != best_host_large.heap->size) {
+				if (heap.size > best_host_large.heap->size) best_host_large.set(i);
+				break;
+			}
+			if ((heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != (best_host_large.heap->flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)) {
+				if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) best_host_large.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != (best_host_large.type->propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) best_host_large.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != (best_host_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) best_host_large.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != (best_host_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) best_host_large.set(i);
+				break;
+			}
+		} while(0);
+		
+		do { //staging
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != (best_staging.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) best_staging.set(i);
+				break;
+			}
+			if ((heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != (best_staging.heap->flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)) {
+				if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) best_staging.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != (best_staging.type->propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) best_staging.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != (best_staging.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) best_staging.set(i);
+				break;
+			}
+			if (heap.size != best_staging.heap->size) {
+				if (heap.size > best_staging.heap->size) best_staging.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != (best_staging.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) best_staging.set(i);
+				break;
+			}
+		} while(0);
+		
+		do { //device_ideal
+			if ((heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != (best_device_ideal.heap->flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)) {
+				if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) best_device_ideal.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != (best_device_ideal.type->propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) best_device_ideal.set(i);
+				break;
+			}
+			if (heap.size != best_device_ideal.heap->size) {
+				if (heap.size > best_device_ideal.heap->size) best_device_ideal.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != (best_device_ideal.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) best_device_ideal.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != (best_device_ideal.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) best_device_ideal.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != (best_device_ideal.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) best_device_ideal.set(i);
+				break;
+			}
+		} while(0);
+		
+		do { //device_large
+			if ((heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != (best_device_large.heap->flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)) {
+				if (heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) best_device_large.set(i);
+				break;
+			}
+			if (heap.size != best_device_large.heap->size) {
+				if (heap.size > best_device_large.heap->size) best_device_large.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != (best_device_large.type->propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) best_device_large.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != (best_device_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) best_device_large.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != (best_device_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) best_device_large.set(i);
+				break;
+			}
+			if ((type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != (best_device_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+				if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) best_device_large.set(i);
+				break;
+			}
+		} while(0);
 	}
 	
-	if (!has_dmt) srcthrow("physical device has no device memory");
-	if (!best_smt) srcthrow("physical device has no host visible memory");
+	if (!best_host_large) srcthrow("physical device has no device memory");
+	srcprintf_debug("%s: host_large (index %u): heap (flags: %u, device: %s, size: %zu), type (flags: %u, host: %s, device: %s, coherent: %s, cached: %s)", 
+		this->properties.deviceName, 
+		best_host_large.index, static_cast<unsigned int>(best_host_large.heap->flags), 
+		best_host_large.heap->flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? "yes" : "no",
+		static_cast<size_t>(best_host_large.heap->size),
+		static_cast<unsigned int>(best_host_large.type->propertyFlags),
+		best_host_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ? "yes" : "no",
+		best_host_large.type->propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT ? "yes" : "no",
+		best_host_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ? "yes" : "no",
+		best_host_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT ? "yes" : "no"	 
+	);
+	
+	if (!best_staging) srcthrow("physical device has no device memory");
+	srcprintf_debug("%s: staging (index %u): heap (flags: %u, device: %s, size: %zu), type (flags: %u, host: %s, device: %s, coherent: %s, cached: %s)", 
+		this->properties.deviceName, 
+		best_staging.index, static_cast<unsigned int>(best_staging.heap->flags), 
+		best_staging.heap->flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? "yes" : "no",
+		static_cast<size_t>(best_staging.heap->size),
+		static_cast<unsigned int>(best_staging.type->propertyFlags),
+		best_staging.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ? "yes" : "no",
+		best_staging.type->propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT ? "yes" : "no",
+		best_staging.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ? "yes" : "no",
+		best_staging.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT ? "yes" : "no"	 
+	);
+	
+	if (!best_device_ideal) srcthrow("physical device has no device memory");
+	srcprintf_debug("%s: device_ideal (index %u): heap (flags: %u, device: %s, size: %zu), type (flags: %u, host: %s, device: %s, coherent: %s, cached: %s)", 
+		this->properties.deviceName, 
+		best_device_ideal.index, static_cast<unsigned int>(best_device_ideal.heap->flags), 
+		best_device_ideal.heap->flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? "yes" : "no",
+		static_cast<size_t>(best_device_ideal.heap->size),
+		static_cast<unsigned int>(best_device_ideal.type->propertyFlags),
+		best_device_ideal.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ? "yes" : "no",
+		best_device_ideal.type->propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT ? "yes" : "no",
+		best_device_ideal.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ? "yes" : "no",
+		best_device_ideal.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT ? "yes" : "no"	 
+	);
+	
+	if (!best_device_large) srcthrow("physical device has no device memory");
+	srcprintf_debug("%s: device_large (index %u): heap (flags: %u, device: %s, size: %zu), type (flags: %u, host: %s, device: %s, coherent: %s, cached: %s)", 
+		this->properties.deviceName, 
+		best_device_large.index, static_cast<unsigned int>(best_device_large.heap->flags), 
+		best_device_large.heap->flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ? "yes" : "no",
+		static_cast<size_t>(best_device_large.heap->size),
+		static_cast<unsigned int>(best_device_large.type->propertyFlags),
+		best_device_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT ? "yes" : "no",
+		best_device_large.type->propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT ? "yes" : "no",
+		best_device_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ? "yes" : "no",
+		best_device_large.type->propertyFlags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT ? "yes" : "no"	 
+	);
+	
+	mem.host_large = best_host_large.index;
+	mem.staging = best_staging.index;
+	mem.device_ideal = best_device_ideal.index;
+	mem.device_large = best_device_large.index;
 }
-
 
 std::vector<vk::physical_device> const & vk::get_physical_devices() {
 	return physical_devices;
@@ -220,4 +382,14 @@ void vk::surface::setup(physical_device const & pdev) {
 	VKR(vkGetPhysicalDeviceSurfacePresentModesKHR(pdev.handle, handle, &num, NULL))
 	surface_present_modes.resize(num);
 	VKR(vkGetPhysicalDeviceSurfacePresentModesKHR(pdev.handle, handle, &num, surface_present_modes.data()))
+}
+
+void vk::physical_device::refresh_surface_capabilities() {
+	for (uint32_t i = 0; i < this->queue_families.size(); i++) {
+		vkGetPhysicalDeviceSurfaceSupportKHR(handle, i, vk::surface::handle, &this->queue_families_presentable[i]);
+	}
+}
+
+void vk::instance::refresh_all_physical_device_surface_capabilities() {
+	
 }

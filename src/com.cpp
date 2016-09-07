@@ -2,7 +2,11 @@
 #include "vk.hpp"
 #include "control.hpp"
 
+#include "timekeeper.hpp"
+
 #include <cstdarg>
+
+static timekeeper tk {timekeeper::clock_type::monotonic};
 
 void com::init() {
 	try {
@@ -16,6 +20,8 @@ void com::init() {
 		srcprintf(FATAL, "initialization failed");
 		throw_fatal;
 	}
+	
+	tk.reset();
 }
 
 void com::term() noexcept {
@@ -27,6 +33,11 @@ void com::term() noexcept {
 void com::frame() {
 	control::frame();
 	com::test::frame();
+	
+	tk.sleep_for_target(120);
+	tk.mark();
+	com::printf("impulse: %f", tk.impulse);
+	com::printf("msec: %u", tk.elapsed_msec);
 }
 
 static constexpr size_t strf_startlen = 1024;

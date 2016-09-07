@@ -17,7 +17,7 @@ void control::init() {
 	xcb_screen_iterator_t xcb_screen_iter   = xcb_setup_roots_iterator( xcb_setup );
 	xcb_screen_t * xcb_screen = xcb_screen_iter.data;
 	com_xcb_window = xcb_generate_id( com_xcb_connection );
-	uint32_t value_list[] = { 0x00004080, XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_STRUCTURE_NOTIFY };
+	uint32_t value_list[] = { 0x00000000, XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_STRUCTURE_NOTIFY };
 	xcb_create_window( com_xcb_connection, XCB_COPY_FROM_PARENT, com_xcb_window, xcb_screen->root, 0, 0, current_extent.width, current_extent.height, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT, xcb_screen->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, value_list );
 	
 	xcb_intern_atom_cookie_t protocols_cookie = xcb_intern_atom( com_xcb_connection, 1, 12, "WM_PROTOCOLS" );
@@ -54,7 +54,7 @@ void control::frame() {
 			if (nev->width != current_extent.width || nev->height != current_extent.height) {
 				current_extent.width = nev->width;
 				current_extent.height = nev->height;
-				vk::swapchain::reinit();
+				vk::swapchain::check_reinit();
 			}
 			break;
 		}

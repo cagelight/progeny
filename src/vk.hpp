@@ -25,13 +25,22 @@ namespace vk {
 		std::vector<VkQueueFamilyProperties> queue_families;
 		std::vector<VkBool32> queue_families_presentable;
 		VkPhysicalDeviceMemoryProperties memory_properties;
-		uint32_t memory_index_staging, memory_index_device;
+
+		struct memory_types {
+			uint32_t host_large;
+			uint32_t staging;
+			uint32_t device_ideal;
+			uint32_t device_large;
+		};
+		memory_types mem;
 		
 		physical_device() = delete;
 		physical_device(VkPhysicalDevice &);
 		physical_device(physical_device const &) = delete;
 		physical_device & operator = (physical_device const &) = delete;
 		physical_device(physical_device &&) = default;
+		
+		void refresh_surface_capabilities();
 	};
 	
 	namespace instance {
@@ -39,6 +48,7 @@ namespace vk {
 		void term() noexcept;
 		VkDevice create_device(physical_device const &, VkDeviceCreateInfo *);
 		void resolve_device_symbols(device &);
+		void refresh_all_physical_device_surface_capabilities();
 	}
 	
 	namespace surface {
@@ -57,11 +67,16 @@ namespace vk {
 		
 		device const * get_device() noexcept;
 		void init(device &);
-		void reinit(); // window size change, swap method change, etc.
+		void check_reinit();
 		void term() noexcept;
 		
-		VkFramebuffer begin_frame(VkRenderPass);
-		void end_frame(VkSemaphore);
+		struct frame_set {
+			VkFramebuffer fb;
+			VkExtent2D extent;
+		};
+
+		frame_set begin_frame(VkCommandBuffer, VkRenderPass, VkAccessFlags dstAccess, VkImageLayout dstLayout, uint32_t dstQueueFamily); // calls vkBeginCommandBuffer on the swapchain device !!!
+		void end_frame(VkCommandBuffer, VkAccessFlags srcAccess, VkImageLayout srcLayout, uint32_t srcQueueFamily); // calls vkEndCommandBuffer on the swapchain device !!!
 	}
 	
 	struct device {

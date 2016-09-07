@@ -18,6 +18,11 @@ static VkPipelineLayout rpass_layout;
 static VkPipeline rpass_pipeline;
 static VkRenderPass rpass = VK_NULL_HANDLE;
 
+static VkCommandPool cmd_pool = VK_NULL_HANDLE;
+static VkCommandBuffer frame_cmd = VK_NULL_HANDLE;
+
+static VkBuffer testv_buffer = VK_NULL_HANDLE;
+static VkDeviceMemory testv_mem = VK_NULL_HANDLE;
 
 static void render_test_init() {
 	VkResult res;
@@ -31,8 +36,8 @@ static void render_test_init() {
 		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 		.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 		.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-		.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-		.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+		.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 	};
 	
 	VkAttachmentReference attachment_ref = {
@@ -236,7 +241,69 @@ static void render_test_init() {
 		.basePipelineIndex = -1,
 	};
 	VKR(com_dev->vkCreateGraphicsPipelines(com_dev->handle, NULL, 1, &pipeline_create_info, NULL, &rpass_pipeline))
+}
+
+static void command_init() {
+	VkResult res;
+	VkCommandPoolCreateInfo cmd_pool_create = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+		.queueFamilyIndex = com_dev->queues[0].queue_family,
+	};
+	VKR(com_dev->vkCreateCommandPool(com_dev->handle, &cmd_pool_create, nullptr, &cmd_pool))
+	VkCommandBufferAllocateInfo cmd_allocate = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		.pNext = nullptr,
+		.commandPool = cmd_pool,
+		.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		.commandBufferCount = 1,
+	};
+	VKR(com_dev->vkAllocateCommandBuffers(com_dev->handle, &cmd_allocate, &frame_cmd))
+}
+
+static void test_init() {
+	VkResult res;
 	
+	VkBufferCreateInfo buffer_create_info = {
+		.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.size = sizeof(testv),
+		.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+		.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+		.queueFamilyIndexCount = 0,
+		.pQueueFamilyIndices = NULL,
+	};
+	
+	VKR(com_dev->vkCreateBuffer(com_dev->handle, &buffer_create_info, NULL, &testv_buffer))
+	
+	VkMemoryRequirements buffer_memory_requirements;
+	com_dev->vkGetBufferMemoryRequirements(com_dev->handle, testv_buffer, &buffer_memory_requirements);
+	
+	VkMemoryAllocateInfo memory_allocate_info = {
+		.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.pNext = NULL,
+		.allocationSize = buffer_memory_requirements.size,
+		.memoryTypeIndex = com_dev->parent.mem.staging,
+	};
+	VKR(com_dev->vkAllocateMemory(com_dev->handle, &memory_allocate_info, NULL, &testv_mem))
+	
+	VKR(com_dev->vkBindBufferMemory(com_dev->handle, testv_buffer, testv_mem, 0))
+	
+	void * vertex_buffer_memory_pointer;
+	VKR(com_dev->vkMapMemory(com_dev->handle, testv_mem, 0, sizeof(testv), 0, &vertex_buffer_memory_pointer))
+
+	memcpy(vertex_buffer_memory_pointer, testv, sizeof(testv));
+	VkMappedMemoryRange flush_range = {
+		.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+		.pNext = NULL,
+		.memory = testv_mem,
+		.offset = 0,
+		.size = VK_WHOLE_SIZE,
+	};
+	com_dev->vkFlushMappedMemoryRanges(com_dev->handle, 1, &flush_range);
+	com_dev->vkUnmapMemory(com_dev->handle, testv_mem);
 }
 
 void com::test::init() {
@@ -246,14 +313,30 @@ void com::test::init() {
 		qset.emplace_back(vk::device::capability::graphics | vk::device::capability::presentable);
 		qset.emplace_back(vk::device::capability::transfer);
 		vk::device::capability_sort(qset);
+		
 		vk::device::initializer ldi {pdev, qset};
 		com_dev = new vk::device {ldi};
+		
+		command_init();
+		test_init();
 		
 		vk::swapchain::init(*com_dev);
 		render_test_init();
 }
 
 void com::test::term() noexcept {
+	if (testv_buffer) {
+		com_dev->vkDestroyBuffer(com_dev->handle, testv_buffer, nullptr);
+		testv_buffer = VK_NULL_HANDLE;
+	}
+	if (testv_mem) {
+		com_dev->vkFreeMemory(com_dev->handle, testv_mem, nullptr);
+		testv_mem = VK_NULL_HANDLE;
+	}
+	if (cmd_pool) {
+		com_dev->vkDestroyCommandPool(com_dev->handle, cmd_pool, nullptr);
+		cmd_pool = VK_NULL_HANDLE;
+	}
 	if (rpass_layout) {
 		com_dev->vkDestroyPipelineLayout(com_dev->handle, rpass_layout, nullptr);
 		rpass_layout = VK_NULL_HANDLE;
@@ -273,7 +356,36 @@ void com::test::term() noexcept {
 	}
 }
 
+static constexpr VkClearValue clear = {
+	.color = {{0.0f, 0.25f, 0.0f, 1.0f}},
+};
+
 void com::test::frame() {
-	//vk::swapchain::begin_frame();
-	//vk::swapchain::end_frame(nullptr);
+	vk::swapchain::frame_set fs = vk::swapchain::begin_frame(frame_cmd, rpass, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, com_dev->queues[0].queue_family);
+	VkRenderPassBeginInfo rpass_begin = {
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		.pNext = nullptr,
+		.renderPass = rpass,
+		.framebuffer = fs.fb,
+		.renderArea = {
+			{0, 0}, fs.extent
+		},
+		.clearValueCount = 1,
+		.pClearValues = &clear,
+	};
+	com_dev->vkCmdBeginRenderPass(frame_cmd, &rpass_begin, VK_SUBPASS_CONTENTS_INLINE);
+	com_dev->vkCmdBindPipeline(frame_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rpass_pipeline);
+	
+	VkViewport viewport = {0.0f, 0.0f, static_cast<float>(fs.extent.width), static_cast<float>(fs.extent.height), 0.0f, 1.0f};
+	VkRect2D scissor = {{0, 0}, fs.extent};
+
+	com_dev->vkCmdSetViewport(frame_cmd, 0, 1, &viewport);
+	com_dev->vkCmdSetScissor(frame_cmd, 0, 1, &scissor);
+	
+	VkDeviceSize offset = 0;
+    com_dev->vkCmdBindVertexBuffers(frame_cmd, 0, 1, &testv_buffer, &offset);
+    com_dev->vkCmdDraw(frame_cmd, 3, 1, 0, 0);
+	
+	com_dev->vkCmdEndRenderPass(frame_cmd);
+	vk::swapchain::end_frame(frame_cmd, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, com_dev->queues[0].queue_family);
 }
