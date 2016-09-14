@@ -1,7 +1,6 @@
 #include "com.hpp"
 #include "vk.hpp"
 #include "control.hpp"
-
 #include "timekeeper.hpp"
 
 #include <cstdarg>
@@ -36,11 +35,9 @@ void com::frame() {
 	
 	tk.sleep_for_target(120);
 	tk.mark();
-	com::printf("impulse: %f", tk.impulse);
-	com::printf("msec: %u", tk.elapsed_msec);
 }
 
-static constexpr size_t strf_startlen = 1024;
+static constexpr size_t strf_startlen = 256;
 std::string com::strf(char const * fmt, ...) noexcept {
 	va_list va;
 	va_start(va, fmt);

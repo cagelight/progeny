@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <memory>
 
+typedef unsigned char byte;
+
 namespace com {
 	
 	void init();

@@ -25,8 +25,9 @@ def options(opt):
 def configure(ctx):
 	ctx.load("g++")
 	ctx.check(features='c cprogram', lib='dl', uselib_store='DL')
-	ctx.check(features='c cprogram', lib='xcb', uselib_store='XCB')
-	ctx.check(features='c cprogram', lib='jemalloc', uselib_store='JMAL')
+	ctx.check_cfg(path='pkg-config', args='--cflags --libs', package='xcb', uselib_store='XCB')
+	ctx.check_cfg(path='pkg-config', args='--cflags --libs', package='libpng', uselib_store='PNG')
+	ctx.check_cfg(path='pkg-config', args='--cflags --libs', package='freetype2', uselib_store='FT')
 	btup = ctx.options.build_type.upper()
 	if btup in ["DEBUG", "NATIVE", "RELEASE"]:
 		Logs.pprint("PINK", "Setting up environment for known build type: " + btup)
@@ -74,9 +75,6 @@ def build(bld):
 		features = "cxx cxxprogram",
 		target = coreprog_name,
 		source = files,
-		uselib = ['XCB', 'DL', 'JMAL'],
+		uselib = ['XCB', 'DL', 'PNG', 'FT'],
 		includes = os.path.join(top, 'src'),
 	)
-	
-def clean(ctx):
-	pass

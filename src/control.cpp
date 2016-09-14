@@ -11,21 +11,21 @@ static xcb_intern_atom_reply_t * delete_reply = NULL;
 VkExtent2D current_extent {800, 600};
 
 void control::init() {
-	com_xcb_connection = xcb_connect( NULL, NULL );
-	if ( !com_xcb_connection ) srcthrow("unable to open xcb connection");
-	xcb_setup_t const * xcb_setup  = xcb_get_setup( com_xcb_connection );
-	xcb_screen_iterator_t xcb_screen_iter   = xcb_setup_roots_iterator( xcb_setup );
+	com_xcb_connection = xcb_connect(NULL, NULL);
+	if (!com_xcb_connection) srcthrow("unable to open xcb connection");
+	xcb_setup_t const * xcb_setup  = xcb_get_setup(com_xcb_connection);
+	xcb_screen_iterator_t xcb_screen_iter   = xcb_setup_roots_iterator(xcb_setup);
 	xcb_screen_t * xcb_screen = xcb_screen_iter.data;
-	com_xcb_window = xcb_generate_id( com_xcb_connection );
-	uint32_t value_list[] = { 0x00000000, XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_STRUCTURE_NOTIFY };
-	xcb_create_window( com_xcb_connection, XCB_COPY_FROM_PARENT, com_xcb_window, xcb_screen->root, 0, 0, current_extent.width, current_extent.height, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT, xcb_screen->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, value_list );
+	com_xcb_window = xcb_generate_id(com_xcb_connection);
+	uint32_t value_list[] = { 0x00100010, XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_STRUCTURE_NOTIFY };
+	xcb_create_window(com_xcb_connection, XCB_COPY_FROM_PARENT, com_xcb_window, xcb_screen->root, 0, 0, current_extent.width, current_extent.height, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT, xcb_screen->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, value_list);
 	
-	xcb_intern_atom_cookie_t protocols_cookie = xcb_intern_atom( com_xcb_connection, 1, 12, "WM_PROTOCOLS" );
-	xcb_intern_atom_reply_t * protocols_reply = xcb_intern_atom_reply( com_xcb_connection, protocols_cookie, 0 );
-	delete_cookie = xcb_intern_atom( com_xcb_connection, 0, 16, "WM_DELETE_WINDOW" );
-	delete_reply = xcb_intern_atom_reply( com_xcb_connection, delete_cookie, 0 );
-	xcb_change_property( com_xcb_connection, XCB_PROP_MODE_REPLACE, com_xcb_window, (*protocols_reply).atom, 4, 32, 1, &(*delete_reply).atom );
-	free( protocols_reply );
+	xcb_intern_atom_cookie_t protocols_cookie = xcb_intern_atom(com_xcb_connection, 1, 12, "WM_PROTOCOLS");
+	xcb_intern_atom_reply_t * protocols_reply = xcb_intern_atom_reply(com_xcb_connection, protocols_cookie, 0);
+	delete_cookie = xcb_intern_atom(com_xcb_connection, 0, 16, "WM_DELETE_WINDOW");
+	delete_reply = xcb_intern_atom_reply(com_xcb_connection, delete_cookie, 0);
+	xcb_change_property(com_xcb_connection, XCB_PROP_MODE_REPLACE, com_xcb_window, protocols_reply->atom, 4, 32, 1, &delete_reply->atom);
+	free(protocols_reply);
 	
 	xcb_map_window(com_xcb_connection, com_xcb_window);
 	xcb_flush(com_xcb_connection);
@@ -59,8 +59,8 @@ void control::frame() {
 			break;
 		}
 		case XCB_CLIENT_MESSAGE: {
-            if( (*(xcb_client_message_event_t*)event).data.data32[0] == (*delete_reply).atom ) {
-				free( delete_reply );
+            if((*(xcb_client_message_event_t*)event).data.data32[0] == delete_reply->atom) {
+				free(delete_reply);
 				run_sem.store(false);
             }
 			break;
@@ -73,7 +73,7 @@ void control::frame() {
 		}
 	}
 	
-	free( event );
+	free(event);
 	
 	goto handle_events;
 }

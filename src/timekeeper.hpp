@@ -36,9 +36,9 @@ public:
 	timeunit phantom_mark();
 	
 private:
+	
 	clockid_t llct;
 	timeunit ts_accum;
-	timeunit ts_since;
 	timeunit ts_mark;
 	
 	double impulse_ = 0.0D;

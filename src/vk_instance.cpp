@@ -114,11 +114,10 @@ void vk::instance::init() {
 	VKR(vkEnumeratePhysicalDevices(vk_instance, &pdev_cnt, NULL))
 	std::vector<VkPhysicalDevice> pdevs {pdev_cnt};
 	VKR(vkEnumeratePhysicalDevices(vk_instance, &pdev_cnt, pdevs.data()))
-	
+
 	for (VkPhysicalDevice & pdev : pdevs) {
 		try {
-			physical_device pdev2 {pdev};
-			physical_devices.push_back(std::move(pdev2));
+			physical_devices.emplace_back(pdev);
 		} catch (com::exception & e) {
 			com::printf("WARNING: a physical device could not be resolved: \"%s\"", e.msg.c_str());
 			continue;
@@ -382,14 +381,4 @@ void vk::surface::setup(physical_device const & pdev) {
 	VKR(vkGetPhysicalDeviceSurfacePresentModesKHR(pdev.handle, handle, &num, NULL))
 	surface_present_modes.resize(num);
 	VKR(vkGetPhysicalDeviceSurfacePresentModesKHR(pdev.handle, handle, &num, surface_present_modes.data()))
-}
-
-void vk::physical_device::refresh_surface_capabilities() {
-	for (uint32_t i = 0; i < this->queue_families.size(); i++) {
-		vkGetPhysicalDeviceSurfaceSupportKHR(handle, i, vk::surface::handle, &this->queue_families_presentable[i]);
-	}
-}
-
-void vk::instance::refresh_all_physical_device_surface_capabilities() {
-	
 }

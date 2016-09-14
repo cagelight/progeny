@@ -1,6 +1,8 @@
 #include "com.hpp"
 #include "vk.hpp"
 
+#include "pmath.hpp"
+
 typedef struct vk_test_vertex_s {
 	float x, y;
 	float r, g, b;
@@ -26,7 +28,6 @@ static VkDeviceMemory testv_mem = VK_NULL_HANDLE;
 
 static void render_test_init() {
 	VkResult res;
-	bool stat = false;
 	
 	VkAttachmentDescription attachment_desc = {
 		.flags = 0,
@@ -306,7 +307,12 @@ static void test_init() {
 	com_dev->vkUnmapMemory(com_dev->handle, testv_mem);
 }
 
+#include "text.hpp"
+
 void com::test::init() {
+		
+		text::test();
+	
 		vk::physical_device const & pdev = vk::get_physical_devices()[0];
 		
 		vk::device::capability_set qset;
@@ -361,12 +367,38 @@ static constexpr VkClearValue clear = {
 };
 
 void com::test::frame() {
-	vk::swapchain::frame_set fs = vk::swapchain::begin_frame(frame_cmd, rpass, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, com_dev->queues[0].queue_family);
+	
+	VkResult res;
+	VkFramebuffer fb;
+	
+	VkCommandBufferBeginInfo begin = {
+		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		.pNext = nullptr,
+		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		.pInheritanceInfo = nullptr,
+	};
+	VKR(com_dev->vkBeginCommandBuffer(frame_cmd, &begin))
+	
+	vk::swapchain::frame_set fs = vk::swapchain::begin_frame(frame_cmd, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, com_dev->queues[0].queue_family);
+	
+	VkFramebufferCreateInfo framebuffer_create_info = {
+		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+		.pNext = nullptr,
+		.flags = 0,
+		.renderPass = rpass,
+		.attachmentCount = 1,
+		.pAttachments = &fs.img_view,
+		.width = fs.extent.width,
+		.height = fs.extent.height,
+		.layers = 1,
+	};
+	com_dev->vkCreateFramebuffer(com_dev->handle, &framebuffer_create_info, nullptr, &fb);
+	
 	VkRenderPassBeginInfo rpass_begin = {
 		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
 		.pNext = nullptr,
 		.renderPass = rpass,
-		.framebuffer = fs.fb,
+		.framebuffer = fb,
 		.renderArea = {
 			{0, 0}, fs.extent
 		},
@@ -388,4 +420,6 @@ void com::test::frame() {
 	
 	com_dev->vkCmdEndRenderPass(frame_cmd);
 	vk::swapchain::end_frame(frame_cmd, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, com_dev->queues[0].queue_family);
+	
+	com_dev->vkDestroyFramebuffer(com_dev->handle, fb, nullptr);
 }

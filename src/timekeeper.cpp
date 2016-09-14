@@ -79,10 +79,10 @@ timekeeper::timekeeper(clock_type ct) : llct(static_cast<clockid_t>(ct)) {
 void timekeeper::mark() {
 	timeunit nmark;
 	clock_gettime(llct, &nmark);
-	ts_since = (nmark - ts_mark) * timescale;
-	impulse_ = ts_since.tv_sec;
-	impulse_ += static_cast<double>(ts_since.tv_nsec) / 1000000000;
-	ts_accum += ts_since;
+	timeunit since {(nmark - ts_mark) * timescale};
+	impulse_ = since.tv_sec;
+	impulse_ += static_cast<double>(since.tv_nsec) / 1000000000;
+	ts_accum += since;
 	elapsed_msec_ = ts_accum.tv_sec * 1000;
 	elapsed_msec_ += ts_accum.tv_nsec / 1000000;
 	ts_mark = nmark;
@@ -96,7 +96,6 @@ void timekeeper::mark_and_change_timescale(double t) {
 void timekeeper::reset() {
 	clock_gettime(llct, &ts_mark);
 	ts_accum = {};
-	ts_since = {};
 	elapsed_msec_ = 0;
 	impulse_ = 0;
 }

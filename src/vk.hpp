@@ -39,8 +39,6 @@ namespace vk {
 		physical_device(physical_device const &) = delete;
 		physical_device & operator = (physical_device const &) = delete;
 		physical_device(physical_device &&) = default;
-		
-		void refresh_surface_capabilities();
 	};
 	
 	namespace instance {
@@ -48,7 +46,6 @@ namespace vk {
 		void term() noexcept;
 		VkDevice create_device(physical_device const &, VkDeviceCreateInfo *);
 		void resolve_device_symbols(device &);
-		void refresh_all_physical_device_surface_capabilities();
 	}
 	
 	namespace surface {
@@ -71,12 +68,13 @@ namespace vk {
 		void term() noexcept;
 		
 		struct frame_set {
-			VkFramebuffer fb;
+			VkImage img;
+			VkImageView img_view;
 			VkExtent2D extent;
 		};
 
-		frame_set begin_frame(VkCommandBuffer, VkRenderPass, VkAccessFlags dstAccess, VkImageLayout dstLayout, uint32_t dstQueueFamily); // calls vkBeginCommandBuffer on the swapchain device !!!
-		void end_frame(VkCommandBuffer, VkAccessFlags srcAccess, VkImageLayout srcLayout, uint32_t srcQueueFamily); // calls vkEndCommandBuffer on the swapchain device !!!
+		frame_set begin_frame(VkCommandBuffer, VkAccessFlags dstAccess, VkImageLayout dstLayout, uint32_t dstQueueFamily);
+		void end_frame(VkCommandBuffer, VkAccessFlags srcAccess, VkImageLayout srcLayout, uint32_t srcQueueFamily); // calls vkEndCommandBuffer!!!
 	}
 	
 	struct device {

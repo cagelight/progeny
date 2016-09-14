@@ -98,7 +98,7 @@ void vk::swapchain::init(device &dev) {
 		}
 		
 		VkPresentModeKHR selected_mode = VK_PRESENT_MODE_FIFO_KHR;
-		uint32_t image_count = pmath::clamp<uint32_t>(3, surface::capabilities.minImageCount, surface::capabilities.maxImageCount);
+		uint32_t image_count = promath::clamp<uint32_t>(3, surface::capabilities.minImageCount, surface::capabilities.maxImageCount);
 		
 		swp_create = {
 			.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -357,33 +357,12 @@ void vk::swapchain::term() noexcept {
 }
 
 static uint32_t current_image_index = 0;
-static VkFramebuffer current_fb = VK_NULL_HANDLE;
 
-vk::swapchain::frame_set vk::swapchain::begin_frame(VkCommandBuffer cmd, VkRenderPass rpass, VkAccessFlags dstAccess, VkImageLayout dstLayout, uint32_t dstQueueFamily) {
-	VkResult res;
+vk::swapchain::frame_set vk::swapchain::begin_frame(VkCommandBuffer cmd, VkAccessFlags dstAccess, VkImageLayout dstLayout, uint32_t dstQueueFamily) {
 	swp_device->vkResetFences(swp_device->handle, 1, &swp_fence);
 	swp_device->vkAcquireNextImageKHR(swp_device->handle, vk_swapchain, UINT64_MAX, nullptr, swp_fence, &current_image_index);
-	VkFramebufferCreateInfo framebuffer_create_info = {
-		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-		.pNext = nullptr,
-		.flags = 0,
-		.renderPass = rpass,
-		.attachmentCount = 1,
-		.pAttachments = &image_sets[current_image_index].image_view,
-		.width = swp_extent.width,
-		.height = swp_extent.height,
-		.layers = 1,
-	};
-	swp_device->vkCreateFramebuffer(swp_device->handle, &framebuffer_create_info, nullptr, &current_fb);
 	swp_device->vkWaitForFences(swp_device->handle, 1, &swp_fence, VK_TRUE, UINT64_MAX);
-	
-	VkCommandBufferBeginInfo begin = {
-		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-		.pNext = nullptr,
-		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-		.pInheritanceInfo = nullptr,
-	};
-	VKR(swp_device->vkBeginCommandBuffer(cmd, &begin))
+
 	VkImageMemoryBarrier swp_image_barrier = {
 		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
 		.pNext = nullptr,
@@ -398,7 +377,7 @@ vk::swapchain::frame_set vk::swapchain::begin_frame(VkCommandBuffer cmd, VkRende
 	};
 	swp_device->vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swp_image_barrier);
 	
-	return {current_fb, swp_extent};
+	return {image_sets[current_image_index].image, image_sets[current_image_index].image_view, swp_extent};
 }
 
 void vk::swapchain::end_frame(VkCommandBuffer cmd, VkAccessFlags srcAccess, VkImageLayout srcLayout, uint32_t srcQueueFamily) {
@@ -443,5 +422,4 @@ void vk::swapchain::end_frame(VkCommandBuffer cmd, VkAccessFlags srcAccess, VkIm
 	swp_device->vkResetFences(swp_device->handle, 1, &swp_fence);
 	swp_device->vkQueueSubmit(swp_queue->handle, 0, nullptr, swp_fence);
 	swp_device->vkWaitForFences(swp_device->handle, 1, &swp_fence, VK_TRUE, UINT64_MAX);
-	swp_device->vkDestroyFramebuffer(swp_device->handle, current_fb, nullptr);
 }
